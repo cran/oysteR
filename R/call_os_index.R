@@ -20,32 +20,49 @@ check_status_code = function(r) {
   status_code = httr::status_code(r)
   if (status_code == 401) {
     stop("Invalid credentials for OSS Index.
-         Please check your username and API token and try again.", call. = FALSE)
+         Please check your username and API token and try again.", call. = FALSE) # nocov
   } else if (status_code == 429) {
     stop("You've made too many requests.
          Please wait and try again later,
-         or use your OSS Index credentials to bypass the rate limits.", call. = FALSE)
+         or use your OSS Index credentials to bypass the rate limits.", call. = FALSE) # nocov
   } else if (status_code == 400) {
     stop("The OSS Index API returned a status code of 400: Bad Request.
          Check the format of the purls in your request.
-         See also: https://ossindex.sonatype.org/doc/rest", call. = FALSE)
+         See also: https://ossindex.sonatype.org/doc/rest", call. = FALSE) # nocov
   } else if (status_code != 200) {
     content = httr::content(r, "text", encoding = "UTF-8")
     msg = glue::glue("There was some problem connecting to the OSS Index API.\\
                 The server responded with:
                   Status Code: {status_code}
-                  Response Body:{content}")
+                  Response Body: {content}")
     stop(msg, call. = FALSE)
   }
   return(invisible(NULL))
 }
 
+# This just seems ugly
+get_config = function() {
+  config = yaml::read_yaml("~/.ossindex/.oss-index-config")
+  if (is.null(config$ossi$Username) ||
+      is.null(config$ossi$Token)) {
+    return(NULL)
+  }
+
+  httr::authenticate(config$ossi$Username,
+                     config$ossi$Token,
+                     type = "basic")
+}
+
+
 # Just pass NULL to POST if no authentication
+# 1. Check .Renviron, the oss config file
 get_post_authenticate = function(verbose) {
   user = Sys.getenv("OSSINDEX_USER", NA)
   token = Sys.getenv("OSSINDEX_TOKEN", NA)
   if (!is.na(user) && !is.na(token)) {
     authenticate = httr::authenticate(user, token, type = "basic")
+  } else if (file.exists("~/.ossindex/.oss-index-config")) {
+    authenticate = get_config()
   } else {
     authenticate = NULL
   }
@@ -60,8 +77,8 @@ get_post_authenticate = function(verbose) {
   return(authenticate)
 }
 
-no_purls_case = function(verbose) {
-  results = tibble::tibble(package = character(0), description = character(0),
+no_purls_case = function() {
+  results = tibble::tibble(oss_package = character(0), description = character(0),
                            reference = character(0), vulnerabilities = list(),
                            no_of_vulnerabilities = integer(0))
   class(results) = c("oysteR_deps", class(results))
@@ -83,19 +100,20 @@ clean_response = function(entry) {
 
 #' @importFrom httr user_agent
 #' @importFrom utils packageVersion
+#' @keywords internal
 get_user_agent = function() {
   version = utils::packageVersion("oysteR")
   ua = paste0("oysteR/", version)
   return(httr::user_agent(ua))
 }
 
-
 globalVariables("vulnerabilities")
 #' @importFrom dplyr bind_rows mutate
 #' @importFrom purrr map map_dbl
 #' @importFrom dplyr %>%
+#' @keywords internal
 call_oss_index = function(purls, verbose) {
-  if (length(purls) == 0L) return(no_purls_case(verbose))
+  if (length(purls) == 0L) return(no_purls_case())
   if (isTRUE(verbose)) cli_h2("Calling sonatype API: https://www.sonatype.com/")
 
   max_size = 128
